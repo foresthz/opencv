@@ -1,6 +1,17 @@
 Android Development with OpenCV {#tutorial_dev_with_OCV_on_Android}
 ===============================
 
+@prev_tutorial{tutorial_O4A_SDK}
+@next_tutorial{tutorial_android_ocl_intro}
+
+|    |    |
+| -: | :- |
+| Original author | Vsevolod Glumov |
+| Compatibility | OpenCV >= 3.0 |
+
+@warning
+This tutorial is deprecated.
+
 This tutorial has been created to help you use OpenCV library within your Android project.
 
 This guide was written with Windows 7 in mind, though it should work with any other OS supported by
@@ -21,7 +32,7 @@ may consult our @ref tutorial_O4A_SDK tutorial.
 
 If you encounter any error after thoroughly following these steps, feel free to contact us via
 [OpenCV4Android](https://groups.google.com/group/android-opencv/) discussion group or OpenCV [Q&A
-forum](http://answers.opencv.org) . We'll do our best to help you out.
+forum](https://forum.opencv.org) . We'll do our best to help you out.
 
 Using OpenCV Library Within Your Android Project
 ------------------------------------------------
@@ -279,7 +290,7 @@ application. It will be capable of accessing camera output, processing it and di
         android:label="@string/app_name"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen" >
     @endcode
--#  Add OpenCV library initialization to your activity. Fix errors by adding requited imports.
+-#  Add OpenCV library initialization to your activity. Fix errors by adding required imports.
     @code{.java}
     private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
@@ -307,7 +318,7 @@ application. It will be capable of accessing camera output, processing it and di
     @endcode
 -#  Defines that your activity implements CvCameraViewListener2 interface and fix activity related
     errors by defining missed methods. For this activity define onCreate, onDestroy and onPause and
-    implement them according code snippet bellow. Fix errors by adding requited imports.
+    implement them according to the code snippet below. Fix errors by adding required imports.
     @code{.java}
     private CameraBridgeViewBase mOpenCvCameraView;
 
@@ -356,10 +367,7 @@ from camera and implements CvCameraViewListener2 interface to get frames from ca
 First of all we create our application view using xml layout. Our layout consists of the only one
 full screen component of class org.opencv.android.JavaCameraView. This class is implemented inside
 OpenCV library. It is inherited from CameraBridgeViewBase, that extends SurfaceView and uses
-standard Android camera API. Alternatively you can use org.opencv.android.NativeCameraView class,
-that implements the same interface, but uses VideoCapture class as camera access back-end.
-opencv:show_fps="true" and opencv:camera_id="any" options enable FPS message and allow to use any
-camera on device. Application tries to use back camera first.
+standard Android camera API.
 
 After creating layout we need to implement Activity class. OpenCV initialization process has been
 already discussed above. In this sample we use asynchronous initialization. Implementation of
