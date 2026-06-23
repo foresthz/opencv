@@ -1,4 +1,4 @@
-/***********************************************************************
+/*M*********************************************************************
  * Software License Agreement (BSD License)
  *
  * Copyright 2008-2011  Marius Muja (mariusm@cs.ubc.ca). All rights reserved.
@@ -30,9 +30,13 @@
 #ifndef OPENCV_FLANN_CONFIG_H_
 #define OPENCV_FLANN_CONFIG_H_
 
+//! @cond IGNORED
+
 #ifdef FLANN_VERSION_
 #undef FLANN_VERSION_
 #endif
 #define FLANN_VERSION_ "1.6.10"
+
+//! @endcond
 
 #endif /* OPENCV_FLANN_CONFIG_H_ */

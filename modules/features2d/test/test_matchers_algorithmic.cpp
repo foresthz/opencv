@@ -40,13 +40,8 @@
 //M*/
 
 #include "test_precomp.hpp"
-#include "opencv2/highgui.hpp"
 
-using namespace std;
-using namespace cv;
-
-const string FEATURES2D_DIR = "features2d";
-const string IMAGE_FILENAME = "tsukuba.png";
+namespace opencv_test { namespace {
 
 /****************************************************************************************\
 *                       Algorithmic tests for descriptor matchers                        *
@@ -66,7 +61,9 @@ protected:
     virtual void run( int );
     void generateData( Mat& query, Mat& train );
 
-    void emptyDataTest();
+#if 0
+    void emptyDataTest(); // FIXIT not used
+#endif
     void matchTest( const Mat& query, const Mat& train );
     void knnMatchTest( const Mat& query, const Mat& train );
     void radiusMatchTest( const Mat& query, const Mat& train );
@@ -78,6 +75,7 @@ private:
     CV_DescriptorMatcherTest& operator=(const CV_DescriptorMatcherTest&) { return *this; }
 };
 
+#if 0
 void CV_DescriptorMatcherTest::emptyDataTest()
 {
     assert( !dmatcher.empty() );
@@ -157,6 +155,7 @@ void CV_DescriptorMatcherTest::emptyDataTest()
     }
 
 }
+#endif
 
 void CV_DescriptorMatcherTest::generateData( Mat& query, Mat& train )
 {
@@ -168,7 +167,7 @@ void CV_DescriptorMatcherTest::generateData( Mat& query, Mat& train )
     rng.fill( buf, RNG::UNIFORM, Scalar::all(0), Scalar(3) );
     buf.convertTo( query, CV_32FC1 );
 
-    // Generate train decriptors as follows:
+    // Generate train descriptors as follows:
     // copy each query descriptor to train set countFactor times
     // and perturb some one element of the copied descriptors in
     // in ascending order. General boundaries of the perturbation
@@ -537,9 +536,140 @@ TEST( Features2d_DescriptorMatcher_BruteForce, regression )
     test.safe_run();
 }
 
+#ifdef HAVE_OPENCV_FLANN
 TEST( Features2d_DescriptorMatcher_FlannBased, regression )
 {
     CV_DescriptorMatcherTest test( "descriptor-matcher-flann-based",
                                   DescriptorMatcher::create("FlannBased"), 0.04f );
     test.safe_run();
 }
+#endif
+
+TEST( Features2d_DMatch, read_write )
+{
+    FileStorage fs(".xml", FileStorage::WRITE + FileStorage::MEMORY);
+    vector<DMatch> matches;
+    matches.push_back(DMatch(1,2,3,4.5f));
+    fs << "Match" << matches;
+    String str = fs.releaseAndGetString();
+    ASSERT_NE( strstr(str.c_str(), "4.5"), (char*)0 );
+}
+
+#ifdef HAVE_OPENCV_FLANN
+TEST( Features2d_FlannBasedMatcher, read_write )
+{
+    static const char* ymlfile = "%YAML:1.0\n---\n"
+    "format: 3\n"
+    "indexParams:\n"
+    "   -\n"
+    "      name: algorithm\n"
+    "      type: 9\n"  // FLANN_INDEX_TYPE_ALGORITHM
+    "      value: 6\n"// this line is changed!
+    "   -\n"
+    "      name: trees\n"
+    "      type: 4\n"
+    "      value: 4\n"
+    "searchParams:\n"
+    "   -\n"
+    "      name: checks\n"
+    "      type: 4\n"
+    "      value: 32\n"
+    "   -\n"
+    "      name: eps\n"
+    "      type: 5\n"
+    "      value: 4.\n"// this line is changed!
+    "   -\n"
+    "      name: explore_all_trees\n"
+    "      type: 8\n"
+    "      value: 0\n"
+    "   -\n"
+    "      name: sorted\n"
+    "      type: 8\n"    // FLANN_INDEX_TYPE_BOOL
+    "      value: 1\n";
+
+    Ptr<DescriptorMatcher> matcher = FlannBasedMatcher::create();
+    FileStorage fs_in(ymlfile, FileStorage::READ + FileStorage::MEMORY);
+    matcher->read(fs_in.root());
+    FileStorage fs_out(".yml", FileStorage::WRITE + FileStorage::MEMORY);
+    matcher->write(fs_out);
+    std::string out = fs_out.releaseAndGetString();
+
+    EXPECT_EQ(ymlfile, out);
+}
+#endif
+
+TEST(Features2d_DMatch, issue_11855)
+{
+    Mat sources = (Mat_<uchar>(2, 3) << 1, 1, 0,
+                                        1, 1, 1);
+    Mat targets = (Mat_<uchar>(2, 3) << 1, 1, 1,
+                                        0, 0, 0);
+    Ptr<BFMatcher> bf = BFMatcher::create(NORM_HAMMING, true);
+    vector<vector<DMatch> > match;
+    bf->knnMatch(sources, targets, match, 1, noArray(), true);
+
+    ASSERT_EQ((size_t)1, match.size());
+    ASSERT_EQ((size_t)1, match[0].size());
+    EXPECT_EQ(1, match[0][0].queryIdx);
+    EXPECT_EQ(0, match[0][0].trainIdx);
+    EXPECT_EQ(0.0f, match[0][0].distance);
+}
+
+TEST(Features2d_DMatch, issue_17771)
+{
+    Mat sources = (Mat_<uchar>(2, 3) << 1, 1, 0,
+                                        1, 1, 1);
+    Mat targets = (Mat_<uchar>(2, 3) << 1, 1, 1,
+                                        0, 0, 0);
+    UMat usources = sources.getUMat(ACCESS_READ);
+    UMat utargets = targets.getUMat(ACCESS_READ);
+    vector<vector<DMatch> > match;
+    Ptr<BFMatcher> ubf = BFMatcher::create(NORM_HAMMING);
+    Mat mask = (Mat_<uchar>(2, 2) << 1, 0, 0, 1);
+    EXPECT_NO_THROW(ubf->knnMatch(usources, utargets, match, 1, mask, true));
+}
+
+// Verify that cross-check BFMatcher gives identical results via Mat (CPU) and UMat (OCL or CPU).
+// When OpenCL is active the UMat path exercises ocl_matchWithCrossCheck; when it is not,
+// both paths fall through to the same CPU code — either way the results must match.
+TEST(Features2d_BFMatcher_CrossCheck, ocl_matches_cpu)
+{
+    RNG rng(42);
+    const int nQuery = 200;
+    const int nTrain = 400;
+    const int dim    = 128;
+
+    // Float descriptors: the OCL dispatch in knnMatchImpl requires CV_32FC1
+    Mat queryMat(nQuery, dim, CV_32FC1);
+    Mat trainMat(nTrain, dim, CV_32FC1);
+    rng.fill(queryMat, RNG::UNIFORM, 0.f, 1.f);
+    rng.fill(trainMat, RNG::UNIFORM, 0.f, 1.f);
+
+    // CPU reference: Mat inputs always take the CPU path
+    Ptr<BFMatcher> cpuMatcher = BFMatcher::create(NORM_L2, true /*crossCheck*/);
+    vector<DMatch> cpuMatches;
+    cpuMatcher->match(queryMat, trainMat, cpuMatches);
+
+    // UMat path: activates OCL dispatch when OpenCL is available
+    UMat queryUMat = queryMat.getUMat(ACCESS_READ);
+    UMat trainUMat = trainMat.getUMat(ACCESS_READ);
+    Ptr<BFMatcher> oclMatcher = BFMatcher::create(NORM_L2, true /*crossCheck*/);
+    vector<DMatch> oclMatches;
+    oclMatcher->match(queryUMat, trainUMat, oclMatches);
+
+    // Both paths must return the same set of matches (order may differ)
+    ASSERT_EQ(cpuMatches.size(), oclMatches.size());
+
+    auto byQuery = [](const DMatch& a, const DMatch& b) { return a.queryIdx < b.queryIdx; };
+    sort(cpuMatches.begin(), cpuMatches.end(), byQuery);
+    sort(oclMatches.begin(), oclMatches.end(), byQuery);
+
+    for (size_t i = 0; i < cpuMatches.size(); ++i)
+    {
+        EXPECT_EQ(cpuMatches[i].queryIdx, oclMatches[i].queryIdx) << "at index " << i;
+        EXPECT_EQ(cpuMatches[i].trainIdx, oclMatches[i].trainIdx) << "at index " << i;
+        EXPECT_NEAR(cpuMatches[i].distance, oclMatches[i].distance, 1e-3f) << "at index " << i;
+    }
+}
+
+}} // namespace

@@ -1,4 +1,4 @@
-/***********************************************************************
+/*M*********************************************************************
  * Software License Agreement (BSD License)
  *
  * Copyright 2008-2009  Marius Muja (mariusm@cs.ubc.ca). All rights reserved.
@@ -29,6 +29,8 @@
 
 #ifndef OPENCV_FLANN_SAMPLING_H_
 #define OPENCV_FLANN_SAMPLING_H_
+
+//! @cond IGNORED
 
 #include "matrix.h"
 #include "random.h"
@@ -77,5 +79,6 @@ Matrix<T> random_sample(const Matrix<T>& srcMatrix, size_t size)
 
 } // namespace
 
+//! @endcond
 
 #endif /* OPENCV_FLANN_SAMPLING_H_ */

@@ -48,7 +48,7 @@
 
 #ifdef HAVE_OPENCL
 
-namespace cvtest {
+namespace opencv_test {
 namespace ocl {
 
 //////////////////// BruteForceMatch /////////////////
@@ -121,6 +121,27 @@ OCL_PERF_TEST_P(BruteForceMatcherFixture, RadiusMatch, ::testing::Combine(OCL_PE
     vector<DMatch> & matches0 = matches[0], & matches1 = matches[1];
     SANITY_CHECK_MATCHES(matches0, 1e-3);
     SANITY_CHECK_MATCHES(matches1, 1e-3);
+}
+
+OCL_PERF_TEST_P(BruteForceMatcherFixture, MatchCrossCheck, ::testing::Combine(OCL_PERF_ENUM(OCL_SIZE_1, OCL_SIZE_2, OCL_SIZE_3), OCL_PERF_ENUM((MatType)CV_32FC1) ) )
+{
+    const Size_MatType_t params = GetParam();
+    const Size srcSize = get<0>(params);
+    const int type = get<1>(params);
+
+    checkDeviceMaxMemoryAllocSize(srcSize, type);
+
+    vector<DMatch> matches;
+    UMat uquery(srcSize, type), utrain(srcSize, type);
+
+    declare.in(uquery, utrain, WARMUP_RNG);
+
+    BFMatcher matcher(NORM_L2, true /*crossCheck*/);
+
+    OCL_TEST_CYCLE()
+        matcher.match(uquery, utrain, matches);
+
+    SANITY_CHECK_MATCHES(matches, 1e-3);
 }
 
 } // ocl

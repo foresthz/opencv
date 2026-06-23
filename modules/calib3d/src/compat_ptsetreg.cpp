@@ -41,6 +41,7 @@
 //M*/
 
 #include "precomp.hpp"
+#include "opencv2/core/core_c.h"
 #include "opencv2/calib3d/calib3d_c.h"
 
 /************************************************************************************\
@@ -58,6 +59,7 @@ CvLevMarq::CvLevMarq()
     iters = 0;
     completeSymmFlag = false;
     errNorm = prevErrNorm = DBL_MAX;
+    solveMethod = cv::DECOMP_SVD;
 }
 
 CvLevMarq::CvLevMarq( int nparams, int nerrs, CvTermCriteria criteria0, bool _completeSymmFlag )
@@ -93,9 +95,6 @@ void CvLevMarq::init( int nparams, int nerrs, CvTermCriteria criteria0, bool _co
     prevParam.reset(cvCreateMat( nparams, 1, CV_64F ));
     param.reset(cvCreateMat( nparams, 1, CV_64F ));
     JtJ.reset(cvCreateMat( nparams, nparams, CV_64F ));
-    JtJN.reset(cvCreateMat( nparams, nparams, CV_64F ));
-    JtJV.reset(cvCreateMat( nparams, nparams, CV_64F ));
-    JtJW.reset(cvCreateMat( nparams, 1, CV_64F ));
     JtErr.reset(cvCreateMat( nparams, 1, CV_64F ));
     if( nerrs > 0 )
     {
@@ -116,15 +115,14 @@ void CvLevMarq::init( int nparams, int nerrs, CvTermCriteria criteria0, bool _co
     state = STARTED;
     iters = 0;
     completeSymmFlag = _completeSymmFlag;
+    solveMethod = cv::DECOMP_SVD;
 }
 
 bool CvLevMarq::update( const CvMat*& _param, CvMat*& matJ, CvMat*& _err )
 {
-    double change;
-
     matJ = _err = 0;
 
-    assert( !err.empty() );
+    CV_Assert( !err.empty() );
     if( state == DONE )
     {
         _param = param;
@@ -157,7 +155,7 @@ bool CvLevMarq::update( const CvMat*& _param, CvMat*& matJ, CvMat*& _err )
         return true;
     }
 
-    assert( state == CHECK_ERR );
+    CV_Assert( state == CHECK_ERR );
     errNorm = cvNorm( err, 0, CV_L2 );
     if( errNorm > prevErrNorm )
     {
@@ -174,7 +172,7 @@ bool CvLevMarq::update( const CvMat*& _param, CvMat*& matJ, CvMat*& _err )
 
     lambdaLg10 = MAX(lambdaLg10-1, -16);
     if( ++iters >= criteria.max_iter ||
-        (change = cvNorm(param, prevParam, CV_RELATIVE_L2)) < criteria.epsilon )
+        cvNorm(param, prevParam, CV_RELATIVE_L2) < criteria.epsilon )
     {
         _param = param;
         state = DONE;
@@ -193,8 +191,6 @@ bool CvLevMarq::update( const CvMat*& _param, CvMat*& matJ, CvMat*& _err )
 
 bool CvLevMarq::updateAlt( const CvMat*& _param, CvMat*& _JtJ, CvMat*& _JtErr, double*& _errNorm )
 {
-    double change;
-
     CV_Assert( !err );
     if( state == DONE )
     {
@@ -227,7 +223,7 @@ bool CvLevMarq::updateAlt( const CvMat*& _param, CvMat*& _JtJ, CvMat*& _JtErr, d
         return true;
     }
 
-    assert( state == CHECK_ERR );
+    CV_Assert( state == CHECK_ERR );
     if( errNorm > prevErrNorm )
     {
         if( ++lambdaLg10 <= 16 )
@@ -243,9 +239,11 @@ bool CvLevMarq::updateAlt( const CvMat*& _param, CvMat*& _JtJ, CvMat*& _JtErr, d
 
     lambdaLg10 = MAX(lambdaLg10-1, -16);
     if( ++iters >= criteria.max_iter ||
-        (change = cvNorm(param, prevParam, CV_RELATIVE_L2)) < criteria.epsilon )
+        cvNorm(param, prevParam, CV_RELATIVE_L2) < criteria.epsilon )
     {
         _param = param;
+        _JtJ = JtJ;
+        _JtErr = JtErr;
         state = DONE;
         return false;
     }
@@ -262,180 +260,36 @@ bool CvLevMarq::updateAlt( const CvMat*& _param, CvMat*& _JtJ, CvMat*& _JtErr, d
 
 void CvLevMarq::step()
 {
+    using namespace cv;
     const double LOG10 = log(10.);
     double lambda = exp(lambdaLg10*LOG10);
-    int i, j, nparams = param->rows;
+    int nparams = param->rows;
 
-    for( i = 0; i < nparams; i++ )
-        if( mask->data.ptr[i] == 0 )
-        {
-            double *row = JtJ->data.db + i*nparams, *col = JtJ->data.db + i;
-            for( j = 0; j < nparams; j++ )
-                row[j] = col[j*nparams] = 0;
-            JtErr->data.db[i] = 0;
-        }
+    Mat _JtJ = cvarrToMat(JtJ);
+    Mat _mask = cvarrToMat(mask);
+
+    int nparams_nz = countNonZero(_mask);
+    if(!JtJN || JtJN->rows != nparams_nz) {
+        // prevent re-allocation in every step
+        JtJN.reset(cvCreateMat( nparams_nz, nparams_nz, CV_64F ));
+        JtJV.reset(cvCreateMat( nparams_nz, 1, CV_64F ));
+        JtJW.reset(cvCreateMat( nparams_nz, 1, CV_64F ));
+    }
+
+    Mat _JtJN = cvarrToMat(JtJN);
+    Mat _JtErr = cvarrToMat(JtJV);
+    Mat_<double> nonzero_param = cvarrToMat(JtJW);
+
+    subMatrixWithMasks(cvarrToMat(JtErr), _JtErr, std::vector<uchar>(1, 1), _mask, /*resize_dst=*/false);
+    subMatrixWithMasks(_JtJ, _JtJN, _mask, _mask, /*resize_dst=*/false);
 
     if( !err )
-        cvCompleteSymm( JtJ, completeSymmFlag );
-#if 1
-    cvCopy( JtJ, JtJN );
-    for( i = 0; i < nparams; i++ )
-        JtJN->data.db[(nparams+1)*i] *= 1. + lambda;
-#else
-    cvSetIdentity(JtJN, cvRealScalar(lambda));
-    cvAdd( JtJ, JtJN, JtJN );
-#endif
-    cvSVD( JtJN, JtJW, 0, JtJV, CV_SVD_MODIFY_A + CV_SVD_U_T + CV_SVD_V_T );
-    cvSVBkSb( JtJW, JtJV, JtJV, JtErr, param, CV_SVD_U_T + CV_SVD_V_T );
-    for( i = 0; i < nparams; i++ )
-        param->data.db[i] = prevParam->data.db[i] - (mask->data.ptr[i] ? param->data.db[i] : 0);
-}
+        completeSymm( _JtJN, completeSymmFlag );
 
+    _JtJN.diag() *= 1. + lambda;
+    solve(_JtJN, _JtErr, nonzero_param, solveMethod);
 
-CV_IMPL int cvRANSACUpdateNumIters( double p, double ep, int modelPoints, int maxIters )
-{
-    return cv::RANSACUpdateNumIters(p, ep, modelPoints, maxIters);
-}
-
-
-CV_IMPL int cvFindHomography( const CvMat* _src, const CvMat* _dst, CvMat* __H, int method,
-                              double ransacReprojThreshold, CvMat* _mask, int maxIters,
-                              double confidence)
-{
-    cv::Mat src = cv::cvarrToMat(_src), dst = cv::cvarrToMat(_dst);
-
-    if( src.channels() == 1 && (src.rows == 2 || src.rows == 3) && src.cols > 3 )
-        cv::transpose(src, src);
-    if( dst.channels() == 1 && (dst.rows == 2 || dst.rows == 3) && dst.cols > 3 )
-        cv::transpose(dst, dst);
-
-    if ( maxIters < 0 )
-        maxIters = 0;
-    if ( maxIters > 2000 )
-        maxIters = 2000;
-
-    if ( confidence < 0 )
-        confidence = 0;
-    if ( confidence > 1 )
-        confidence = 1;
-
-    const cv::Mat H = cv::cvarrToMat(__H), mask = cv::cvarrToMat(_mask);
-    cv::Mat H0 = cv::findHomography(src, dst, method, ransacReprojThreshold,
-                                    _mask ? cv::_OutputArray(mask) : cv::_OutputArray(), maxIters,
-                                    confidence);
-
-    if( H0.empty() )
-    {
-        cv::Mat Hz = cv::cvarrToMat(__H);
-        Hz.setTo(cv::Scalar::all(0));
-        return 0;
-    }
-    H0.convertTo(H, H.type());
-    return 1;
-}
-
-
-CV_IMPL int cvFindFundamentalMat( const CvMat* points1, const CvMat* points2,
-                                  CvMat* fmatrix, int method,
-                                  double param1, double param2, CvMat* _mask )
-{
-    cv::Mat m1 = cv::cvarrToMat(points1), m2 = cv::cvarrToMat(points2);
-
-    if( m1.channels() == 1 && (m1.rows == 2 || m1.rows == 3) && m1.cols > 3 )
-        cv::transpose(m1, m1);
-    if( m2.channels() == 1 && (m2.rows == 2 || m2.rows == 3) && m2.cols > 3 )
-        cv::transpose(m2, m2);
-
-    const cv::Mat FM = cv::cvarrToMat(fmatrix), mask = cv::cvarrToMat(_mask);
-    cv::Mat FM0 = cv::findFundamentalMat(m1, m2, method, param1, param2,
-                                         _mask ? cv::_OutputArray(mask) : cv::_OutputArray());
-
-    if( FM0.empty() )
-    {
-        cv::Mat FM0z = cv::cvarrToMat(fmatrix);
-        FM0z.setTo(cv::Scalar::all(0));
-        return 0;
-    }
-
-    CV_Assert( FM0.cols == 3 && FM0.rows % 3 == 0 && FM.cols == 3 && FM.rows % 3 == 0 && FM.channels() == 1 );
-    cv::Mat FM1 = FM.rowRange(0, MIN(FM0.rows, FM.rows));
-    FM0.rowRange(0, FM1.rows).convertTo(FM1, FM1.type());
-    return FM1.rows / 3;
-}
-
-
-CV_IMPL void cvComputeCorrespondEpilines( const CvMat* points, int pointImageID,
-                                          const CvMat* fmatrix, CvMat* _lines )
-{
-    cv::Mat pt = cv::cvarrToMat(points), fm = cv::cvarrToMat(fmatrix);
-    cv::Mat lines = cv::cvarrToMat(_lines);
-    const cv::Mat lines0 = lines;
-
-    if( pt.channels() == 1 && (pt.rows == 2 || pt.rows == 3) && pt.cols > 3 )
-        cv::transpose(pt, pt);
-
-    cv::computeCorrespondEpilines(pt, pointImageID, fm, lines);
-
-    bool tflag = lines0.channels() == 1 && lines0.rows == 3 && lines0.cols > 3;
-    lines = lines.reshape(lines0.channels(), (tflag ? lines0.cols : lines0.rows));
-
-    if( tflag )
-    {
-        CV_Assert( lines.rows == lines0.cols && lines.cols == lines0.rows );
-        if( lines0.type() == lines.type() )
-            transpose( lines, lines0 );
-        else
-        {
-            transpose( lines, lines );
-            lines.convertTo( lines0, lines0.type() );
-        }
-    }
-    else
-    {
-        CV_Assert( lines.size() == lines0.size() );
-        if( lines.data != lines0.data )
-            lines.convertTo(lines0, lines0.type());
-    }
-}
-
-
-CV_IMPL void cvConvertPointsHomogeneous( const CvMat* _src, CvMat* _dst )
-{
-    cv::Mat src = cv::cvarrToMat(_src), dst = cv::cvarrToMat(_dst);
-    const cv::Mat dst0 = dst;
-
-    int d0 = src.channels() > 1 ? src.channels() : MIN(src.cols, src.rows);
-
-    if( src.channels() == 1 && src.cols > d0 )
-        cv::transpose(src, src);
-
-    int d1 = dst.channels() > 1 ? dst.channels() : MIN(dst.cols, dst.rows);
-
-    if( d0 == d1 )
-        src.copyTo(dst);
-    else if( d0 < d1 )
-        cv::convertPointsToHomogeneous(src, dst);
-    else
-        cv::convertPointsFromHomogeneous(src, dst);
-
-    bool tflag = dst0.channels() == 1 && dst0.cols > d1;
-    dst = dst.reshape(dst0.channels(), (tflag ? dst0.cols : dst0.rows));
-
-    if( tflag )
-    {
-        CV_Assert( dst.rows == dst0.cols && dst.cols == dst0.rows );
-        if( dst0.type() == dst.type() )
-            transpose( dst, dst0 );
-        else
-        {
-            transpose( dst, dst );
-            dst.convertTo( dst0, dst0.type() );
-        }
-    }
-    else
-    {
-        CV_Assert( dst.size() == dst0.size() );
-        if( dst.data != dst0.data )
-            dst.convertTo(dst0, dst0.type());
-    }
+    int j = 0;
+    for( int i = 0; i < nparams; i++ )
+        param->data.db[i] = prevParam->data.db[i] - (mask->data.ptr[i] ? nonzero_param(j++) : 0);
 }

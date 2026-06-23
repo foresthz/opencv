@@ -42,8 +42,7 @@
 #include "test_precomp.hpp"
 #include "opencv2/imgproc/imgproc_c.h"
 
-using namespace cv;
-using namespace std;
+namespace opencv_test { namespace {
 
 class CV_AccumBaseTest : public cvtest::ArrayTest
 {
@@ -72,11 +71,11 @@ void CV_AccumBaseTest::get_test_array_types_and_sizes( int test_case_idx,
                         vector<vector<Size> >& sizes, vector<vector<int> >& types )
 {
     RNG& rng = ts->get_rng();
-    int depth = cvtest::randInt(rng) % 3, cn = cvtest::randInt(rng) & 1 ? 3 : 1;
-    int accdepth = std::max((int)(cvtest::randInt(rng) % 2 + 1), depth);
+    int depth = cvtest::randInt(rng) % 4, cn = cvtest::randInt(rng) & 1 ? 3 : 1;
+    int accdepth = (int)(cvtest::randInt(rng) % 2 + 1);
     int i, input_count = (int)test_array[INPUT].size();
     cvtest::ArrayTest::get_test_array_types_and_sizes( test_case_idx, sizes, types );
-    depth = depth == 0 ? CV_8U : depth == 1 ? CV_32F : CV_64F;
+    depth = depth == 0 ? CV_8U : depth == 1 ? CV_16U : depth == 2 ? CV_32F : CV_64F;
     accdepth = accdepth == 1 ? CV_32F : CV_64F;
     accdepth = MAX(accdepth, depth);
 
@@ -246,3 +245,116 @@ TEST(Video_Acc, accuracy) { CV_AccTest test; test.safe_run(); }
 TEST(Video_AccSquared, accuracy) { CV_SquareAccTest test; test.safe_run(); }
 TEST(Video_AccProduct, accuracy) { CV_MultiplyAccTest test; test.safe_run(); }
 TEST(Video_RunningAvg, accuracy) { CV_RunningAvgTest test; test.safe_run(); }
+
+typedef testing::TestWithParam<tuple<Size, int, int> > Video_Acc_Cn4;
+
+TEST_P(Video_Acc_Cn4, accuracy)
+{
+    const Size size = get<0>(GetParam());
+    const int pattern = get<1>(GetParam());
+    const int srcType = get<2>(GetParam());
+
+    RNG& rng = theRNG();
+
+    Mat src(size, srcType);
+    Mat dst(size, CV_32FC4);
+    Mat mask(size, CV_8UC1);
+
+    if (srcType == CV_8UC4)
+        rng.fill(src, RNG::UNIFORM, Scalar::all(0), Scalar::all(256));
+    else
+        rng.fill(src, RNG::UNIFORM, Scalar::all(-10.0), Scalar::all(10.0));
+
+    rng.fill(dst, RNG::UNIFORM, Scalar::all(-1000.0), Scalar::all(1000.0));
+
+    for (int y = 0; y < mask.rows; ++y)
+    {
+        uchar* row = mask.ptr<uchar>(y);
+
+        for (int x = 0; x < mask.cols; ++x)
+        {
+            switch (pattern)
+            {
+            case 0:
+                row[x] = 0;
+                break;
+            case 1:
+                row[x] = 255;
+                break;
+            case 2:
+                row[x] = ((x + y) % 2) ? 255 : 0;
+                break;
+            case 3:
+                row[x] = ((x * 13 + y * 7) % 5) ? 255 : 0;
+                break;
+            default:
+                row[x] = ((x * 17 + y * 11) % 3) ? 255 : 0;
+                break;
+            }
+        }
+    }
+
+    Mat dstRef = dst.clone();
+
+    if (srcType == CV_32FC4)
+    {
+        for (int y = 0; y < src.rows; ++y)
+        {
+            const Vec4f* srcRow = src.ptr<Vec4f>(y);
+            Vec4f* dstRefRow = dstRef.ptr<Vec4f>(y);
+            const uchar* maskRow = mask.ptr<uchar>(y);
+
+            for (int x = 0; x < src.cols; ++x)
+            {
+                if (maskRow[x])
+                {
+                    for (int c = 0; c < 4; ++c)
+                        dstRefRow[x][c] += srcRow[x][c];
+                }
+            }
+        }
+    }
+    else
+    {
+        CV_Assert(srcType == CV_8UC4);
+
+        for (int y = 0; y < src.rows; ++y)
+        {
+            const Vec4b* srcRow = src.ptr<Vec4b>(y);
+            Vec4f* dstRefRow = dstRef.ptr<Vec4f>(y);
+            const uchar* maskRow = mask.ptr<uchar>(y);
+
+            for (int x = 0; x < src.cols; ++x)
+            {
+                if (maskRow[x])
+                {
+                    for (int c = 0; c < 4; ++c)
+                        dstRefRow[x][c] += static_cast<float>(srcRow[x][c]);
+                }
+            }
+        }
+    }
+
+    cv::accumulate(src, dst, mask);
+
+    const double err = cv::norm(dst, dstRef, NORM_INF);
+
+    EXPECT_EQ(0.0, err)
+        << "size=" << size
+        << ", pattern=" << pattern
+        << ", srcType=" << srcType;
+}
+
+INSTANTIATE_TEST_CASE_P(Accumulate,
+    Video_Acc_Cn4,
+    testing::Combine(
+        testing::Values(Size(1, 1),
+                        Size(3, 5),
+                        Size(17, 7),
+                        Size(37, 19),
+                        Size(128, 16),
+                        Size(641, 37)),
+        testing::Values(0, 1, 2, 3, 4),
+        testing::Values(CV_32FC4, CV_8UC4)));
+
+}} // namespace

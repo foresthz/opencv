@@ -1,40 +1,43 @@
 #include "perf_precomp.hpp"
+#include "perf_feature2d.hpp"
 
-using namespace std;
-using namespace cv;
-using namespace perf;
-using std::tr1::make_tuple;
-using std::tr1::get;
-
-enum { TYPE_5_8 =FastFeatureDetector::TYPE_5_8, TYPE_7_12 = FastFeatureDetector::TYPE_7_12, TYPE_9_16 = FastFeatureDetector::TYPE_9_16 };
-CV_ENUM(FastType, TYPE_5_8, TYPE_7_12, TYPE_9_16)
-
-typedef std::tr1::tuple<string, FastType> File_Type_t;
-typedef perf::TestBaseWithParam<File_Type_t> fast;
-
-#define FAST_IMAGES \
-    "cv/detectors_descriptors_evaluation/images_datasets/leuven/img1.png",\
-    "stitching/a3.png"
-
-PERF_TEST_P(fast, detect, testing::Combine(
-                            testing::Values(FAST_IMAGES),
-                            FastType::all()
-                          ))
+namespace opencv_test
 {
-    string filename = getDataPath(get<0>(GetParam()));
-    int type = get<1>(GetParam());
-    Mat frame = imread(filename, IMREAD_GRAYSCALE);
+using namespace perf;
 
-    if (frame.empty())
-        FAIL() << "Unable to load source image " << filename;
+typedef tuple<int, int, bool, string> Fast_Params_t;
+typedef perf::TestBaseWithParam<Fast_Params_t> Fast_Params;
 
-    declare.in(frame);
+PERF_TEST_P(Fast_Params, detect,
+    testing::Combine(
+        testing::Values(20,30,100),                   // threshold
+        testing::Values(
+            // (int)FastFeatureDetector::TYPE_5_8,
+            // (int)FastFeatureDetector::TYPE_7_12,
+            (int)FastFeatureDetector::TYPE_9_16       // detector_type
+        ),
+        testing::Bool(),                              // nonmaxSuppression
+        testing::Values("cv/inpaint/orig.png",
+                        "cv/cameracalibration/chess9.png")
+    ))
+{
+    int threshold_p = get<0>(GetParam());
+    int type_p = get<1>(GetParam());
+    bool nonmaxSuppression_p = get<2>(GetParam());
+    string filename = getDataPath(get<3>(GetParam()));
 
-    Ptr<FeatureDetector> fd = FastFeatureDetector::create(20, true, type);
-    ASSERT_FALSE( fd.empty() );
-    vector<KeyPoint> points;
+    Mat img = imread(filename, IMREAD_GRAYSCALE);
+    ASSERT_FALSE(img.empty()) << "Failed to load image: " << filename;
 
-    TEST_CYCLE() fd->detect(frame, points);
+    vector<KeyPoint> keypoints;
 
-    SANITY_CHECK_KEYPOINTS(points);
+    declare.in(img);
+    TEST_CYCLE()
+    {
+        FAST(img, keypoints, threshold_p, nonmaxSuppression_p, (FastFeatureDetector::DetectorType)type_p);
+    }
+
+    SANITY_CHECK_NOTHING();
 }
+
+} // namespace opencv_test

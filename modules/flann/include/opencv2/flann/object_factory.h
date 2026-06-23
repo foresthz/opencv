@@ -1,4 +1,4 @@
-/***********************************************************************
+/*M*********************************************************************
  * Software License Agreement (BSD License)
  *
  * Copyright 2008-2009  Marius Muja (mariusm@cs.ubc.ca). All rights reserved.
@@ -30,6 +30,8 @@
 
 #ifndef OPENCV_FLANN_OBJECT_FACTORY_H_
 #define OPENCV_FLANN_OBJECT_FACTORY_H_
+
+//! @cond IGNORED
 
 #include <map>
 
@@ -87,5 +89,7 @@ private:
 };
 
 }
+
+//! @endcond
 
 #endif /* OPENCV_FLANN_OBJECT_FACTORY_H_ */

@@ -1,4 +1,4 @@
-/***********************************************************************
+/*M*********************************************************************
  * Software License Agreement (BSD License)
  *
  * Copyright 2008-2009  Marius Muja (mariusm@cs.ubc.ca). All rights reserved.
@@ -31,6 +31,8 @@
 #ifndef OPENCV_FLANN_GROUND_TRUTH_H_
 #define OPENCV_FLANN_GROUND_TRUTH_H_
 
+//! @cond IGNORED
+
 #include "dist.h"
 #include "matrix.h"
 
@@ -45,8 +47,8 @@ void find_nearest(const Matrix<typename Distance::ElementType>& dataset, typenam
     typedef typename Distance::ResultType DistanceType;
     int n = nn + skip;
 
-    std::vector<int> match(n);
-    std::vector<DistanceType> dists(n);
+    cv::AutoBuffer<int> match(n);
+    cv::AutoBuffer<DistanceType> dists(n);
 
     dists[0] = distance(dataset[0], query, dataset.cols);
     match[0] = 0;
@@ -90,5 +92,7 @@ void compute_ground_truth(const Matrix<typename Distance::ElementType>& dataset,
 
 
 }
+
+//! @endcond
 
 #endif //OPENCV_FLANN_GROUND_TRUTH_H_

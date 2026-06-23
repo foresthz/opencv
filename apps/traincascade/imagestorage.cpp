@@ -1,5 +1,4 @@
 #include "opencv2/core.hpp"
-#include "opencv2/core/core_c.h"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
 
@@ -28,25 +27,18 @@ CvCascadeImageReader::NegReader::NegReader()
 
 bool CvCascadeImageReader::NegReader::create( const string _filename, Size _winSize )
 {
-    string dirname, str;
+    string str;
     std::ifstream file(_filename.c_str());
     if ( !file.is_open() )
         return false;
 
-    size_t pos = _filename.rfind('\\');
-    char dlmrt = '\\';
-    if (pos == string::npos)
-    {
-        pos = _filename.rfind('/');
-        dlmrt = '/';
-    }
-    dirname = pos == string::npos ? "" : _filename.substr(0, pos) + dlmrt;
     while( !file.eof() )
     {
         std::getline(file, str);
+        str.erase(str.find_last_not_of(" \n\r\t")+1);
         if (str.empty()) break;
         if (str.at(0) == '#' ) continue; /* comment */
-        imgFilenames.push_back(dirname + str);
+        imgFilenames.push_back(str);
     }
     file.close();
 
@@ -61,9 +53,11 @@ bool CvCascadeImageReader::NegReader::nextImg()
     size_t count = imgFilenames.size();
     for( size_t i = 0; i < count; i++ )
     {
-        src = imread( imgFilenames[last++], 0 );
-        if( src.empty() )
+        src = imread( imgFilenames[last++], IMREAD_GRAYSCALE );
+        if( src.empty() ){
+            last %= count;
             continue;
+        }
         round += last / count;
         round = round % (winSize.width * winSize.height);
         last %= count;
@@ -82,7 +76,7 @@ bool CvCascadeImageReader::NegReader::nextImg()
                  ((float)winSize.height + point.y) / ((float)src.rows) );
 
     Size sz( (int)(scale*src.cols + 0.5F), (int)(scale*src.rows + 0.5F) );
-    resize( src, img, sz );
+    resize( src, img, sz, 0, 0, INTER_LINEAR_EXACT );
     return true;
 }
 
@@ -113,7 +107,7 @@ bool CvCascadeImageReader::NegReader::get( Mat& _img )
             point.y = offset.y;
             scale *= scaleFactor;
             if( scale <= 1.0F )
-                resize( src, img, Size( (int)(scale*src.cols), (int)(scale*src.rows) ) );
+                resize( src, img, Size( (int)(scale*src.cols), (int)(scale*src.rows) ), 0, 0, INTER_LINEAR_EXACT );
             else
             {
                 if ( !nextImg() )
@@ -143,7 +137,7 @@ bool CvCascadeImageReader::PosReader::create( const string _filename )
         fread( &vecSize, sizeof( vecSize ), 1, file ) != 1 ||
         fread( &tmp, sizeof( tmp ), 1, file ) != 1 ||
         fread( &tmp, sizeof( tmp ), 1, file ) != 1 )
-        CV_Error_( CV_StsParseError, ("wrong file format for %s\n", _filename.c_str()) );
+        CV_Error_( cv::Error::StsParseError, ("wrong file format for %s\n", _filename.c_str()) );
     base = sizeof( count ) + sizeof( vecSize ) + 2*sizeof( tmp );
     if( feof( file ) )
         return false;
@@ -159,14 +153,14 @@ bool CvCascadeImageReader::PosReader::get( Mat &_img )
     uchar tmp = 0;
     size_t elements_read = fread( &tmp, sizeof( tmp ), 1, file );
     if( elements_read != 1 )
-        CV_Error( CV_StsBadArg, "Can not get new positive sample. The most possible reason is "
+        CV_Error( cv::Error::StsBadArg, "Can not get new positive sample. The most possible reason is "
                                 "insufficient count of samples in given vec-file.\n");
     elements_read = fread( vec, sizeof( vec[0] ), vecSize, file );
     if( elements_read != (size_t)(vecSize) )
-        CV_Error( CV_StsBadArg, "Can not get new positive sample. Seems that vec-file has incorrect structure.\n");
+        CV_Error( cv::Error::StsBadArg, "Can not get new positive sample. Seems that vec-file has incorrect structure.\n");
 
     if( feof( file ) || last++ >= count )
-        CV_Error( CV_StsBadArg, "Can not get new positive sample. vec-file is over.\n");
+        CV_Error( cv::Error::StsBadArg, "Can not get new positive sample. vec-file is over.\n");
 
     for( int r = 0; r < _img.rows; r++ )
     {

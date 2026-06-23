@@ -43,7 +43,6 @@
 namespace cv {
 namespace ml {
 
-NormalBayesClassifier::Params::Params() {}
 
 class NormalBayesClassifierImpl : public NormalBayesClassifier
 {
@@ -53,11 +52,9 @@ public:
         nallvars = 0;
     }
 
-    void setParams(const Params&) {}
-    Params getParams() const { return Params(); }
-
-    bool train( const Ptr<TrainData>& trainData, int flags )
+    bool train( const Ptr<TrainData>& trainData, int flags ) CV_OVERRIDE
     {
+        CV_Assert(!trainData.empty());
         const float min_variation = FLT_EPSILON;
         Mat responses = trainData->getNormCatResponses();
         Mat __cls_labels = trainData->getClassLabels();
@@ -104,7 +101,7 @@ public:
                 norm(var_idx, __var_idx, NORM_INF) != 0 ||
                 cls_labels.size() != __cls_labels.size() ||
                 norm(cls_labels, __cls_labels, NORM_INF) != 0 )
-                CV_Error( CV_StsBadArg,
+                CV_Error( cv::Error::StsBadArg,
                 "The new training data is inconsistent with the original training data; varIdx and the class labels should be the same" );
         }
 
@@ -207,6 +204,7 @@ public:
             results = &_results;
             results_prob = !_results_prob.empty() ? &_results_prob : 0;
             rawOutput = _rawOutput;
+            value = 0;
         }
 
         const Mat* c;
@@ -222,7 +220,7 @@ public:
         float* value;
         bool rawOutput;
 
-        void operator()( const Range& range ) const
+        void operator()(const Range& range) const CV_OVERRIDE
         {
             int cls = -1;
             int rtype = 0, rptype = 0;
@@ -240,12 +238,12 @@ public:
             if (results_prob)
             {
                 rptype = results_prob->type();
-                rpstep = results_prob->isContinuous() ? 1 : results_prob->step/results_prob->elemSize();
+                rpstep = results_prob->isContinuous() ? results_prob->cols : results_prob->step/results_prob->elemSize();
             }
             // allocate memory and initializing headers for calculating
             cv::AutoBuffer<double> _buffer(nvars*2);
-            double* _diffin = _buffer;
-            double* _diffout = _buffer + nvars;
+            double* _diffin = _buffer.data();
+            double* _diffout = _buffer.data() + nvars;
             Mat diffin( 1, nvars, CV_64FC1, _diffin );
             Mat diffout( 1, nvars, CV_64FC1, _diffout );
 
@@ -301,12 +299,12 @@ public:
         }
     };
 
-    float predict( InputArray _samples, OutputArray _results, int flags ) const
+    float predict( InputArray _samples, OutputArray _results, int flags ) const CV_OVERRIDE
     {
         return predictProb(_samples, _results, noArray(), flags);
     }
 
-    float predictProb( InputArray _samples, OutputArray _results, OutputArray _resultsProb, int flags ) const
+    float predictProb( InputArray _samples, OutputArray _results, OutputArray _resultsProb, int flags ) const CV_OVERRIDE
     {
         int value=0;
         Mat samples = _samples.getMat(), results, resultsProb;
@@ -314,11 +312,11 @@ public:
         bool rawOutput = (flags & RAW_OUTPUT) != 0;
 
         if( samples.type() != CV_32F || samples.cols != nallvars )
-            CV_Error( CV_StsBadArg,
+            CV_Error( cv::Error::StsBadArg,
                      "The input samples must be 32f matrix with the number of columns = nallvars" );
 
-        if( samples.rows > 1 && _results.needed() )
-            CV_Error( CV_StsNullPtr,
+        if( (samples.rows > 1) && (! _results.needed()) )
+            CV_Error( cv::Error::StsNullPtr,
                      "When the number of input samples is >1, the output vector of results must be passed" );
 
         if( _results.needed() )
@@ -342,10 +340,11 @@ public:
         return (float)value;
     }
 
-    void write( FileStorage& fs ) const
+    void write( FileStorage& fs ) const CV_OVERRIDE
     {
         int nclasses = (int)cls_labels.total(), i;
 
+        writeFormat(fs);
         fs << "var_count" << (var_idx.empty() ? nallvars : (int)var_idx.total());
         fs << "var_all" << nallvars;
 
@@ -382,14 +381,14 @@ public:
         fs << "c" << c;
     }
 
-    void read( const FileNode& fn )
+    void read( const FileNode& fn ) CV_OVERRIDE
     {
         clear();
 
         fn["var_all"] >> nallvars;
 
         if( nallvars <= 0 )
-            CV_Error( CV_StsParseError,
+            CV_Error( cv::Error::StsParseError,
                      "The field \"var_count\" of NBayes classifier is missing or non-positive" );
 
         fn["var_idx"] >> var_idx;
@@ -398,7 +397,7 @@ public:
         int nclasses = (int)cls_labels.total(), i;
 
         if( cls_labels.empty() || nclasses < 1 )
-            CV_Error( CV_StsParseError, "No or invalid \"cls_labels\" in NBayes classifier" );
+            CV_Error( cv::Error::StsParseError, "No or invalid \"cls_labels\" in NBayes classifier" );
 
         FileNodeIterator
             count_it = fn["count"].begin(),
@@ -429,7 +428,7 @@ public:
         fn["c"] >> c;
     }
 
-    void clear()
+    void clear() CV_OVERRIDE
     {
         count.clear();
         sum.clear();
@@ -444,10 +443,10 @@ public:
         nallvars = 0;
     }
 
-    bool isTrained() const { return !avg.empty(); }
-    bool isClassifier() const { return true; }
-    int getVarCount() const { return nallvars; }
-    String getDefaultModelName() const { return "opencv_ml_nbayes"; }
+    bool isTrained() const CV_OVERRIDE { return !avg.empty(); }
+    bool isClassifier() const CV_OVERRIDE { return true; }
+    int getVarCount() const CV_OVERRIDE { return nallvars; }
+    String getDefaultName() const CV_OVERRIDE { return "opencv_ml_nbayes"; }
 
     int nallvars;
     Mat var_idx, cls_labels, c;
@@ -455,10 +454,15 @@ public:
 };
 
 
-Ptr<NormalBayesClassifier> NormalBayesClassifier::create(const Params&)
+Ptr<NormalBayesClassifier> NormalBayesClassifier::create()
 {
     Ptr<NormalBayesClassifierImpl> p = makePtr<NormalBayesClassifierImpl>();
     return p;
+}
+
+Ptr<NormalBayesClassifier> NormalBayesClassifier::load(const String& filepath, const String& nodeName)
+{
+    return Algorithm::load<NormalBayesClassifier>(filepath, nodeName);
 }
 
 }

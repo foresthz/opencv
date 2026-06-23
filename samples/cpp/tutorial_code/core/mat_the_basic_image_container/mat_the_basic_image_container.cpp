@@ -1,6 +1,6 @@
 /*  For description look into the help() function. */
 
-#include "opencv2/core/core.hpp"
+#include "opencv2/core.hpp"
 #include <iostream>
 
 using namespace std;
@@ -9,14 +9,14 @@ using namespace cv;
 static void help()
 {
     cout
-    << "\n--------------------------------------------------------------------------" << endl
+    << "\n---------------------------------------------------------------------------" << endl
     << "This program shows how to create matrices(cv::Mat) in OpenCV and its serial"
-    << " out capabilities"                                                            << endl
-    << "That is, cv::Mat M(...); M.create and cout << M. "                            << endl
-    << "Shows how output can be formated to OpenCV, python, numpy, csv and C styles." << endl
-    << "Usage:"                                                                       << endl
-    << "./cvout_sample"                                                               << endl
-    << "--------------------------------------------------------------------------"   << endl
+    << " out capabilities"                                                             << endl
+    << "That is, cv::Mat M(...); M.create and cout << M. "                             << endl
+    << "Shows how output can be formatted to OpenCV, python, numpy, csv and C styles." << endl
+    << "Usage:"                                                                        << endl
+    << "./mat_the_basic_image_container"                                               << endl
+    << "-----------------------------------------------------------------------------" << endl
     << endl;
 }
 
@@ -54,10 +54,11 @@ int main(int,char**)
     //! [matlab]
 
     // create a 3x3 double-precision identity matrix
-    //! [comma]
-    Mat C = (Mat_<double>(3,3) << 0, -1, 0, -1, 5, -1, 0, -1, 0);
+
+    //! [list]
+    Mat C = Mat_<double>({3, 3}, {0, -1, 0, -1, 5, -1, 0, -1, 0});
     cout << "C = " << endl << " " << C << endl << endl;
-    //! [comma]
+    //! [list]
 
     //! [clone]
     Mat RowClone = C.row(1).clone();
@@ -70,7 +71,7 @@ int main(int,char**)
     randu(R, Scalar::all(0), Scalar::all(255));
     //! [random]
 
-    // Demonstrate the output formating options
+    // Demonstrate the output formatting options
     //! [out-default]
     cout << "R (default) = " << endl <<        R           << endl << endl;
     //! [out-default]

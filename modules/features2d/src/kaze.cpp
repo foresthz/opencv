@@ -53,11 +53,11 @@ http://www.robesafe.com/personal/pablo.alcantarilla/papers/Alcantarilla12eccv.pd
 namespace cv
 {
 
-    class KAZE_Impl : public KAZE
+    class KAZE_Impl CV_FINAL : public KAZE
     {
     public:
         KAZE_Impl(bool _extended, bool _upright, float _threshold, int _octaves,
-                   int _sublevels, int _diffusivity)
+                   int _sublevels, KAZE::DiffusivityType _diffusivity)
         : extended(_extended)
         , upright(_upright)
         , threshold(_threshold)
@@ -67,40 +67,40 @@ namespace cv
         {
         }
 
-        virtual ~KAZE_Impl() {}
+        virtual ~KAZE_Impl() CV_OVERRIDE {}
 
-        void setExtended(bool extended_) { extended = extended_; }
-        bool getExtended() const { return extended; }
+        void setExtended(bool extended_) CV_OVERRIDE { extended = extended_; }
+        bool getExtended() const CV_OVERRIDE { return extended; }
 
-        void setUpright(bool upright_) { upright = upright_; }
-        bool getUpright() const { return upright; }
+        void setUpright(bool upright_) CV_OVERRIDE { upright = upright_; }
+        bool getUpright() const CV_OVERRIDE { return upright; }
 
-        void setThreshold(double threshold_) { threshold = (float)threshold_; }
-        double getThreshold() const { return threshold; }
+        void setThreshold(double threshold_) CV_OVERRIDE { threshold = (float)threshold_; }
+        double getThreshold() const CV_OVERRIDE { return threshold; }
 
-        void setNOctaves(int octaves_) { octaves = octaves_; }
-        int getNOctaves() const { return octaves; }
+        void setNOctaves(int octaves_) CV_OVERRIDE { octaves = octaves_; }
+        int getNOctaves() const CV_OVERRIDE { return octaves; }
 
-        void setNOctaveLayers(int octaveLayers_) { sublevels = octaveLayers_; }
-        int getNOctaveLayers() const { return sublevels; }
+        void setNOctaveLayers(int octaveLayers_) CV_OVERRIDE { sublevels = octaveLayers_; }
+        int getNOctaveLayers() const CV_OVERRIDE { return sublevels; }
 
-        void setDiffusivity(int diff_) { diffusivity = diff_; }
-        int getDiffusivity() const { return diffusivity; }
+        void setDiffusivity(KAZE::DiffusivityType diff_) CV_OVERRIDE{ diffusivity = diff_; }
+        KAZE::DiffusivityType getDiffusivity() const CV_OVERRIDE{ return diffusivity; }
 
         // returns the descriptor size in bytes
-        int descriptorSize() const
+        int descriptorSize() const CV_OVERRIDE
         {
             return extended ? 128 : 64;
         }
 
         // returns the descriptor type
-        int descriptorType() const
+        int descriptorType() const CV_OVERRIDE
         {
             return CV_32F;
         }
 
         // returns the default norm type
-        int defaultNorm() const
+        int defaultNorm() const CV_OVERRIDE
         {
             return NORM_L2;
         }
@@ -108,14 +108,83 @@ namespace cv
         void detectAndCompute(InputArray image, InputArray mask,
                               std::vector<KeyPoint>& keypoints,
                               OutputArray descriptors,
-                              bool useProvidedKeypoints)
+                              bool useProvidedKeypoints) CV_OVERRIDE
         {
+            CV_INSTRUMENT_REGION();
+
+#ifdef HAVE_OPENCL
+            bool use_opencl = ocl::useOpenCL() && upright
+                              && !ocl::Device::getDefault().hostUnifiedMemory();
+            if (use_opencl)
+            {
+                UMat img_gray = image.getUMat();
+                if (img_gray.channels() > 1)
+                {
+                    UMat tmp;
+                    cvtColor(img_gray, tmp, COLOR_BGR2GRAY);
+                    img_gray = tmp;
+                }
+
+                UMat img1_32;
+                int depth = img_gray.depth();
+                if ( depth == CV_32F )
+                    img1_32 = img_gray;
+                else if ( depth == CV_8U )
+                    img_gray.convertTo(img1_32, CV_32F, 1.0 / 255.0, 0);
+                else if ( depth == CV_16U )
+                    img_gray.convertTo(img1_32, CV_32F, 1.0 / 65535.0, 0);
+
+                CV_Assert( ! img1_32.empty() );
+
+                KAZEOptions options;
+                options.img_width = img1_32.cols;
+                options.img_height = img1_32.rows;
+                options.extended = extended;
+                options.upright = upright;
+                options.dthreshold = threshold;
+                options.omax = octaves;
+                options.nsublevels = sublevels;
+                options.diffusivity = diffusivity;
+
+                KAZEFeatures impl(options);
+                UTPyramid uPyr;
+                impl.Create_Nonlinear_Scale_Space_UMat(img1_32, uPyr);
+
+                if (!useProvidedKeypoints)
+                {
+                    impl.Feature_Detection_UMat(uPyr, keypoints);
+                }
+
+                if (!mask.empty())
+                {
+                    cv::KeyPointsFilter::runByPixelsMask(keypoints, mask.getMat());
+                }
+
+                if( descriptors.needed() )
+                {
+                    impl.Compute_Descriptors_UMat(keypoints, descriptors, uPyr);
+
+                    CV_Assert((!descriptors.empty() || descriptors.cols() == descriptorSize()));
+                    CV_Assert((!descriptors.empty() || (descriptors.type() == descriptorType())));
+                }
+                return;
+            }
+#endif
+
+            // CPU path
             cv::Mat img = image.getMat();
-            if (img.type() != CV_8UC1)
+            if (img.channels() > 1)
                 cvtColor(image, img, COLOR_BGR2GRAY);
 
             Mat img1_32;
-            img.convertTo(img1_32, CV_32F, 1.0 / 255.0, 0);
+            if ( img.depth() == CV_32F )
+                img1_32 = img;
+            else if ( img.depth() == CV_8U )
+                img.convertTo(img1_32, CV_32F, 1.0 / 255.0, 0);
+            else if ( img.depth() == CV_16U )
+                img.convertTo(img1_32, CV_32F, 1.0 / 65535.0, 0);
+
+            CV_Assert( ! img1_32.empty() );
 
             KAZEOptions options;
             options.img_width = img.cols;
@@ -142,16 +211,19 @@ namespace cv
 
             if( descriptors.needed() )
             {
-                Mat& desc = descriptors.getMatRef();
+                Mat desc;
                 impl.Feature_Description(keypoints, desc);
+                desc.copyTo(descriptors);
 
                 CV_Assert((!desc.rows || desc.cols == descriptorSize()));
                 CV_Assert((!desc.rows || (desc.type() == descriptorType())));
             }
         }
 
-        void write(FileStorage& fs) const
+        void write(FileStorage& fs) const CV_OVERRIDE
         {
+            writeFormat(fs);
+            fs << "name" << getDefaultName();
             fs << "extended" << (int)extended;
             fs << "upright" << (int)upright;
             fs << "threshold" << threshold;
@@ -160,14 +232,21 @@ namespace cv
             fs << "diffusivity" << diffusivity;
         }
 
-        void read(const FileNode& fn)
+        void read(const FileNode& fn) CV_OVERRIDE
         {
-            extended = (int)fn["extended"] != 0;
-            upright = (int)fn["upright"] != 0;
-            threshold = (float)fn["threshold"];
-            octaves = (int)fn["octaves"];
-            sublevels = (int)fn["sublevels"];
-            diffusivity = (int)fn["diffusivity"];
+            // if node is empty, keep previous value
+            if (!fn["extended"].empty())
+                extended = (int)fn["extended"] != 0;
+            if (!fn["upright"].empty())
+                upright = (int)fn["upright"] != 0;
+            if (!fn["threshold"].empty())
+                threshold = (float)fn["threshold"];
+            if (!fn["octaves"].empty())
+                octaves = (int)fn["octaves"];
+            if (!fn["sublevels"].empty())
+                sublevels = (int)fn["sublevels"];
+            if (!fn["diffusivity"].empty())
+                diffusivity = static_cast<KAZE::DiffusivityType>((int)fn["diffusivity"]);
         }
 
         bool extended;
@@ -175,14 +254,20 @@ namespace cv
         float threshold;
         int octaves;
         int sublevels;
-        int diffusivity;
+        KAZE::DiffusivityType diffusivity;
     };
 
     Ptr<KAZE> KAZE::create(bool extended, bool upright,
                             float threshold,
                             int octaves, int sublevels,
-                            int diffusivity)
+                            KAZE::DiffusivityType diffusivity)
     {
         return makePtr<KAZE_Impl>(extended, upright, threshold, octaves, sublevels, diffusivity);
     }
+
+    String KAZE::getDefaultName() const
+    {
+        return (Feature2D::getDefaultName() + ".KAZE");
+    }
+
 }
